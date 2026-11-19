@@ -1,0 +1,54 @@
+{
+  "_comment": "Merge the hooks block into ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json. install.sh does this for you (with a backup). Permissions are examples only; install.sh never touches them.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/claude-harness/model-router/guard_agent_model.py\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/claude-harness/guards/no-self-matching-wait-loops.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/claude-harness/model-router/context_budget.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(ocr review:*)",
+      "Bash(ocr scan:*)",
+      "Bash(grok-leaf --dry-run:*)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./**/credentials*.json)",
+      "Bash(grok-leaf --always-approve:*)"
+    ]
+  }
+}

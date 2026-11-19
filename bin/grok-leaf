@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+# grok-leaf: send one small, self-contained job to the Grok CLI and print the answer.
+#
+# This is the optional "cheap lane". Claude stays in charge: it decides what to send,
+# and it checks what comes back before using it. grok-leaf only makes the call safe
+# and boring:
+#   - exits 3 with a clear message when the grok CLI is not installed;
+#   - refuses prompts that look like they contain a secret (exit 4);
+#   - never passes --always-approve, and refuses it if you try (exit 2);
+#   - runs in an empty scratch folder unless you pass --cwd, so Grok's own tools
+#     cannot touch your project by accident;
+#   - closes stdin and sets a timeout, so a call cannot hang a session;
+#   - caps how many calls run at once (default 2) with lock files.
+#
+# Any cheap agent CLI can sit behind this lane. Set CHEAP_LEAF_CMD to a command that
+# reads the prompt on stdin and prints the answer, and it is used instead of grok:
+#   export CHEAP_LEAF_CMD='llm -m some-cheap-model'      # or: 'ollama run small-model'
+# The secret tripwire, scratch folder, timeout and slot cap still apply.
+#
+# Usage:
+#   grok-leaf [options] "prompt text"
+#   grok-leaf [options] < prompt.txt
+#   grok-leaf [options] --prompt-file prompt.txt
+#
+# Options:
+#   --timeout SECONDS   wall-clock limit per call (default 300, env GROK_LEAF_TIMEOUT)
+#   --slots N           max concurrent calls (default 2, env GROK_LEAF_SLOTS)
+#   --effort LEVEL      reasoning effort (default low, env GROK_LEAF_EFFORT)
+#   --model NAME        model name passed to grok -m (default: grok's own default)
+#   --max-turns N       agent turns (default 4)
+#   --web               allow Grok's web search (off by default)
+#   --cwd DIR           let Grok see DIR instead of an empty scratch folder
+#   --json              ask grok for JSON output
+#   --dry-run           print the command that would run, then exit 0
+#   -h, --help          show this help
+#
+# Exit codes: 0 ok, 2 bad usage, 3 grok not installed, 4 prompt refused,
+#             5 no free slot before the timeout, 124 call timed out, other = grok's code.
+set -euo pipefail
+
+usage() { sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
+
+timeout_s="${GROK_LEAF_TIMEOUT:-300}"
+slots="${GROK_LEAF_SLOTS:-2}"
+effort="${GROK_LEAF_EFFORT:-low}"
+model=""
+max_turns=4
+web=0
+cwd=""
+json=0
+dry=0
+prompt=""
+prompt_file=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --timeout) timeout_s="${2:?}"; shift 2 ;;
+    --slots) slots="${2:?}"; shift 2 ;;
+    --effort) effort="${2:?}"; shift 2 ;;
+    --model) model="${2:?}"; shift 2 ;;
+    --max-turns) max_turns="${2:?}"; shift 2 ;;
+    --web) web=1; shift ;;
+    --cwd) cwd="${2:?}"; shift 2 ;;
+    --json) json=1; shift ;;
+    --prompt-file) prompt_file="${2:?}"; shift 2 ;;
+    --dry-run) dry=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    --always-approve|--permission-mode*|--dangerously*)
+      echo "grok-leaf: refusing $1. Leaf jobs never auto-approve Grok's tools." >&2; exit 2 ;;
+    --) shift; prompt="$*"; break ;;
+    -*) echo "grok-leaf: unknown option $1 (see --help)" >&2; exit 2 ;;
+    *) prompt="$*"; break ;;
+  esac
+done
+
+for n in "$timeout_s" "$slots" "$max_turns"; do
+  case "$n" in ''|*[!0-9]*) echo "grok-leaf: expected a whole number, got '$n'" >&2; exit 2 ;; esac
+done
+[ "$slots" -ge 1 ] || slots=1
+
+if [ -n "$prompt_file" ]; then
+  [ -r "$prompt_file" ] || { echo "grok-leaf: cannot read $prompt_file" >&2; exit 2; }
+  prompt="$(cat -- "$prompt_file")"
+elif [ -z "$prompt" ] && [ ! -t 0 ]; then
+  prompt="$(cat)"
+fi
+[ -n "${prompt//[[:space:]]/}" ] || { echo "grok-leaf: empty prompt (see --help)" >&2; exit 2; }
+
+# Refuse anything that looks like a credential. This is a tripwire, not a guarantee:
+# the caller must still never put secrets, customer data or private files in a leaf job.
+secret_re='(sk-[A-Za-z0-9_-]{16,}|xai-[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|AIza[0-9A-Za-z_-]{30,}|AKIA[0-9A-Z]{16}|xox[abprs]-[A-Za-z0-9-]{10,}|Bearer [A-Za-z0-9._~+/-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|[0-9]{8,10}:[A-Za-z0-9_-]{35})'
+if printf '%s' "$prompt" | grep -Eq -- "$secret_re"; then
+  echo "grok-leaf: prompt refused, it looks like it contains a key or token. Remove it and retry." >&2
+  exit 4
+fi
+
+adapter="${CHEAP_LEAF_CMD:-}"
+grok_bin="${GROK_BIN:-$(command -v grok 2>/dev/null || true)}"
+if [ -z "$grok_bin" ] && [ -x "$HOME/.grok/bin/grok" ]; then grok_bin="$HOME/.grok/bin/grok"; fi
+if [ -z "$adapter" ] && { [ -z "$grok_bin" ] || [ ! -x "$grok_bin" ]; }; then
+  echo "grok-leaf: grok CLI not installed and CHEAP_LEAF_CMD not set. Do this job inline instead." >&2
+  exit 3
+fi
+
+work="$(mktemp -d "${TMPDIR:-/tmp}/grok-leaf.XXXXXX")"
+trap 'rm -rf -- "$work"' EXIT
+chmod 700 "$work"
+printf '%s' "$prompt" > "$work/prompt.txt"
+mkdir -p "$work/cwd"
+[ -n "$cwd" ] || cwd="$work/cwd"
+
+if [ -n "$adapter" ]; then
+  # Adapter mode: prompt on stdin, run from the scratch folder (or --cwd).
+  # shellcheck disable=SC2016  # the inner script is meant to expand later, in the child shell
+  cmd=(bash -c 'cd -- "$1" && exec bash -c "$2" < "$3"' adapter "$cwd" "$adapter" "$work/prompt.txt")
+else
+cmd=("$grok_bin" --prompt-file "$work/prompt.txt" --reasoning-effort "$effort"
+     --max-turns "$max_turns" --cwd "$cwd")
+[ "$web" -eq 1 ] || cmd+=(--disable-web-search)
+[ -z "$model" ] || cmd+=(-m "$model")
+[ "$json" -eq 0 ] || cmd+=(--output-format json)
+fi
+
+if [ "$dry" -eq 1 ]; then
+  printf 'would run (slots=%s, timeout=%ss):' "$slots" "$timeout_s"
+  printf ' %q' timeout "$timeout_s" "${cmd[@]}"
+  printf ' < /dev/null\n'
+  exit 0
+fi
+
+# Concurrency cap: take the first free slot lock, or wait for one up to the timeout.
+lockdir="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/grok-leaf-$(id -u)"
+mkdir -p "$lockdir"; chmod 700 "$lockdir"
+got=""
+deadline=$(( $(date +%s) + timeout_s ))
+while [ -z "$got" ]; do
+  for i in $(seq 1 "$slots"); do
+    exec {fd}>"$lockdir/slot.$i"
+    if flock -n "$fd"; then got="$i"; break; fi
+    exec {fd}>&-
+  done
+  [ -n "$got" ] && break
+  if [ "$(date +%s)" -ge "$deadline" ]; then
+    echo "grok-leaf: all $slots slots busy for ${timeout_s}s; giving up." >&2
+    exit 5
+  fi
+  sleep 2
+done
+
+set +e
+timeout --kill-after=10 "$timeout_s" "${cmd[@]}" < /dev/null
+rc=$?
+set -e
+if [ "$rc" -eq 124 ]; then echo "grok-leaf: timed out after ${timeout_s}s." >&2; fi
+exit "$rc"

@@ -1,0 +1,18 @@
+{
+  "post": "https://x.com/LanzhiAI/status/2122212822138650873",
+  "source": "https://x.com/everyday_1123/status/2122192621099741497",
+  "workflow": [
+    {"role": "commander", "where": "main", "model": "claude-mythos-5-2"},
+    {"role": "execution", "subagent_types": ["opus-worker"], "model": "claude-opus-5-5"},
+    {"role": "architect", "subagent_types": ["architect"], "model": "claude-fable-5-2"},
+    {"role": "review", "subagent_types": ["code-reviewer", "security-reviewer"], "model": "", "tool": "ocr"},
+    {"role": "read", "subagent_types": ["routine-worker"], "model": "claude-sonnet-5-5"},
+    {"role": "lookup", "subagent_types": ["quick-worker"], "model": "claude-haiku-5-5"},
+    {"role": "outsource", "subagent_types": ["lowtier"], "model": "", "lane": "skill"}
+  ],
+  "expensive_markers": ["opus", "fable"],
+  "reason_token": "OPUS-REASON:",
+  "context_delegate_tokens": 120000,
+  "context_warn_tokens": 150000,
+  "context_limit_tokens": 200000
+}
