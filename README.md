@@ -14,15 +14,17 @@ Free to use. If it saved you time, tips are welcome: [Cash App](https://cash.app
 
 Every `Agent` (or `Task`) call goes through one PreToolUse hook, `hooks/model-router/guard_agent_model.py`. It reads the job description and the top of the prompt, works out what kind of job it is, and sets `subagent_type` to the matching worker. It also strips any `model` argument, because the model is pinned in each worker's agent file.
 
-| Role | Worker (`agents/*.md`) | Default model | Gets |
-|---|---|---|---|
-| Lead | the main session | your session model | planning, judgment, final checks |
-| Execution | `opus-worker` | `claude-opus-5-5` | code changes, file edits, running a task |
-| Architecture | `architect` | `claude-fable-5-2` | design decisions, plan reviews |
-| Read | `routine-worker` | `claude-sonnet-5-5` | read a document or log and report back |
-| Lookup | `quick-worker` | `claude-haiku-5-5` | status, grep, where-is questions |
-| Review | `code-reviewer`, `security-reviewer` | none | stubs that point Claude at the `ocr` review CLI |
-| Cheap lane | `lowtier` skill + `bin/grok-leaf` | Grok CLI, or any CLI you plug in | short self-contained chores, image prompts |
+| Role | Worker (`agents/*.md`) | Default model | Effort | Gets |
+|---|---|---|---|---|
+| Lead | the main session | your session model | your session level | planning, judgment, final checks |
+| Execution | `opus-worker` | `claude-opus-5-5` | `medium` | code changes, file edits, running a task |
+| Architecture | `architect` | `claude-fable-5-2` | `high` | design decisions, plan reviews |
+| Read | `routine-worker` | `claude-sonnet-5-5` | `low` | read a document or log and report back |
+| Lookup | `quick-worker` | `claude-haiku-5-5` | `low` | status, grep, where-is questions |
+| Review | `code-reviewer`, `security-reviewer` | none | none | stubs that point Claude at the `ocr` review CLI |
+| Cheap lane | `lowtier` skill + `bin/grok-leaf` | Grok CLI, or any CLI you plug in | low | short self-contained chores, image prompts |
+
+Each worker file also pins a reasoning effort (`effort:` in its frontmatter, one of `low`, `medium`, `high`, `xhigh`, `max`), so lookups and reads do not think as hard as design work. Without it a worker on a different model than the session does not take the session level and runs at that model's default. Change the line to taste; a single call can still pass its own `effort`, and the `CLAUDE_CODE_EFFORT_LEVEL` environment variable overrides all of it.
 
 Rules the guard applies:
 

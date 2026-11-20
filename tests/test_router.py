@@ -364,5 +364,34 @@ class WaitLoopGuardTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
 
 
+class WorkerEffort(unittest.TestCase):
+    """Every spawnable worker pins a reasoning effort; cheap workers stay cheap."""
+
+    LEVELS = ("low", "medium", "high", "xhigh", "max")
+    STUBS = {"code-reviewer", "security-reviewer"}
+
+    def front(self, path):
+        text = path.read_text()
+        self.assertTrue(text.startswith("---\n"), path.name)
+        head = text.split("---\n", 2)[1]
+        return dict(line.split(":", 1) for line in head.splitlines() if ":" in line)
+
+    def test_every_worker_has_a_valid_effort(self):
+        files = sorted((ROOT / "agents").glob("*.md"))
+        self.assertTrue(files)
+        for f in files:
+            if f.stem in self.STUBS:
+                continue
+            effort = self.front(f).get("effort", "").strip()
+            self.assertIn(effort, self.LEVELS, f.name)
+
+    def test_cheap_workers_do_not_outthink_the_expensive_ones(self):
+        rank = {f.stem: self.LEVELS.index(self.front(f)["effort"].strip())
+                for f in (ROOT / "agents").glob("*.md") if f.stem not in self.STUBS}
+        for cheap in ("quick-worker", "routine-worker"):
+            self.assertLessEqual(rank[cheap], rank["opus-worker"])
+        self.assertLessEqual(rank["opus-worker"], rank["architect"])
+
+
 if __name__ == "__main__":
     unittest.main()
