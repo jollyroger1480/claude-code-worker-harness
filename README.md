@@ -4,9 +4,9 @@
 
 A small set of Claude Code hooks, agents and skills that make the main Claude session act as a lead: it keeps the hard thinking and hands each job to the worker that suits it. File changes go to an execution worker, long reads go to a cheaper read worker, lookups go to the cheapest one, and odd chores go to a cheap lane outside Claude. That lane uses the Grok CLI by default, but any cheap agent CLI fits there.
 
-[![Demo video: the router sending three sample calls to three workers](assets/harness-demo-poster.jpg)](assets/harness-demo.mp4)
+https://github.com/user-attachments/assets/85ebec4d-7ef8-487c-bfe0-62bf4d6b4b76
 
-One-minute demo (click to play). Every terminal pane in it is the real hook run on sample calls. Music: "Arturia Acid" by Doctor_Dreamchip, CC0, from Freesound.
+One-minute demo ([file in this repo](assets/harness-demo.mp4)). Every terminal pane in it is the real hook run on sample calls. Music: "Arturia Acid" by Doctor_Dreamchip, CC0, from Freesound.
 
 Free to use. If it saved you time, tips are welcome: [Cash App](https://cash.app/$jollyroger1480) or Bitcoin `bc1qydycnf5pjhez5d0mrgmmumyv2g5nc63mwet89j`. More links at the [bottom](#support-and-links).
 
