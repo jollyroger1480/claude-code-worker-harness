@@ -156,3 +156,7 @@ This project is free, and a tip is welcome but never expected.
 Not affiliated with Anthropic or xAI. Claude and Claude Code are Anthropic's; Grok is xAI's.
 
 License: MIT.
+
+## Changes
+
+See [CHANGELOG.md](CHANGELOG.md). Latest: reasoning effort pinned per worker (2026-11-20).
